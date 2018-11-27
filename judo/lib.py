@@ -50,6 +50,21 @@ url_leaders_by_weight = {
 }
 
 
+def category_map(category):
+    '''
+    Turns '-52 kg' into 'women_52'
+    '''
+    men = ['60', '66', '73', '81', '90', '100']
+    women = ['48', '52', '57', '63', '70', '78']
+    temp = category.split()[0]
+    menos = temp[0] == '-'
+    peso = temp[1:]
+    
+    new_category = ('men_' if peso in men else 'women_') + peso + ('+' if not menos else '')
+    
+    return new_category
+
+
 def get_all_battles(driver, profile_id, from_date, time_sleep=0.1):
     """
     Extracts all contests information of a profile, including video url.
@@ -123,8 +138,11 @@ def get_all_battles(driver, profile_id, from_date, time_sleep=0.1):
         if battle['date'] <= from_date:
             break
         # else
-        
         battles.append(battle)
+    
+    if len(battles) == 0:
+        print('Up to date!')
+        return None
     
     battles = pd.DataFrame(battles)
     
@@ -161,13 +179,55 @@ def get_all_battles(driver, profile_id, from_date, time_sleep=0.1):
     battles['competition_family'] = battles.event.apply(
         lambda event: next((competition_to_family_map[c] for c in competition_to_family_map.keys() if c in event), 'Other'))
     
+    battles.category = battles.category.apply(category_map)
+    
     column_order = ['wins', 'local', 'opponent', 'event', 'date', 'round', 
                     'local_points', 'opponent_points', 'duration', 'category', 
                     'has_video', 'competition_family', 'url_video']
     battles = battles[column_order]
     
+    
     return battles
 
+
+def update_competitor(driver, conn, profile_id):
+    """
+    Given profile_id of competitor:
+      1. Extracts new battles since competitor's last extraction
+      2. Appends new battles to battles table
+      3. Updates last_extraction value for this competitor
+      
+    Args:
+        driver (selenium.webdriver): to connect to web browser via selenium
+        conn (SQLiteConnection): connection to sql file containing tables competitors, battles
+        profile_id (str): profile_id of competitor: 3238, 17332, 569...
+    """
+    # when did last_extraction happen for this competitor?
+    last_extraction = conn.as_pandas(
+        f'select last_extraction from competitors where profile_id="{profile_id}"', 
+        parse_dates=['last_extraction']
+    ).iloc[0,0]
+    
+    # extract new battles
+    new_battles = get_all_battles(
+        driver=driver,
+        profile_id=profile_id, 
+        from_date=last_extraction
+    )
+    
+    if new_battles is not None:
+        # append new_battles to battles table
+        conn.append_table('battles', new_battles)
+        # update last_extraction in competitors table
+        last_extraction_str = str(new_battles.date.max())
+        conn.query(
+            f'''
+            UPDATE competitors 
+            SET last_extraction="{last_extraction_str}" 
+            WHERE profile_id="{profile_id}";
+            '''
+        )
+        
 
 def extract_all_profiles_weight(driver, weight):
     """
@@ -225,6 +285,46 @@ def extract_all_profiles_weight(driver, weight):
 
 
 
+def get_info_video_judobase(driver, url_video):
+    """
+    Extracts local, opponent, and YOUTUBE url of embedded video in judobase
+    
+    Args:
+        driver (selenium.webdriver): driver to interact with the web via selenium
+        url_video (str): url to video in judobase. 
+            example: 'https://judobase.ijf.org/#/competition/contest/gs_jpn2017_m_p100_0004'
+    """
+    driver.get(url_video)
+    time.sleep(1)
+
+    # extract names
+    local, opponent = map(lambda x: x.text, driver.find_elements_by_class_name('col-xs-6'))
+    local, opponent = map(lambda x: x[:x.find('\n')], [local, opponent])
+    
+    # extract YOUTUBE url
+    count = 0
+    while True:
+        try:
+            youtube_frame = driver.find_element_by_class_name('js-media')
+            driver.switch_to.frame(youtube_frame)
+            time.sleep(1)
+            url_youtube = driver.find_element_by_class_name('ytp-title-link').get_attribute('href')
+            break
+        except:
+            count += 1
+            if count == 5:
+                url_youtube = 'error'
+                print('STOP Retry')
+                break
+            
+            print('Retry...')
+            driver.get(url_video)
+            time.sleep(1)
+
+            
+    return local, opponent, url_youtube
+
+
 
 class SQLiteConnection:
     def __init__(self, path, logger=None):
@@ -234,14 +334,7 @@ class SQLiteConnection:
         Args:
             path: (Path) Path to the database file
         """
-        try:
-            assert isinstance(path, Path)
-        except AssertionError:
-            if logger is not None:
-                logger.warning("This would be better if path was of type Path")
-            else:
-                print("WARNING: path must be of class Path")
-
+        if not isinstance(path, Path):
             path = Path(path)
 
         try:
@@ -251,6 +344,7 @@ class SQLiteConnection:
         self.path = path
         self.logger = logger
 
+        
     def query(self, query_string, values=None, empty_response=False, lastrowid=False):
         cursor = self.connection.cursor()
         if values is None:
@@ -268,7 +362,7 @@ class SQLiteConnection:
         else:
             return cursor.fetchall()
 
-    def as_pandas(self, query_string, index_col='index', parse_dates=None, columns=None, params=None):
+    def as_pandas(self, query_string, index_col=None, parse_dates=None, columns=None, params=None):
         """
         Return query as pandas data frame
 
