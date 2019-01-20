@@ -4,7 +4,7 @@ import sqlite3
 import datetime
 from selenium import webdriver
 from pathlib import Path
-
+import traceback
 
 def load_chromedriver(en_casa):
     """
@@ -238,6 +238,7 @@ def update_competitor(driver, conn, profile_id):
     )
     
     if new_battles is not None:
+        print('new battles!')
         # append new_battles to battles table
         conn.append_table('battles', new_battles)
         # update last_extraction in competitors table
@@ -469,46 +470,47 @@ def get_info_video_judobase(competitor_name, driver, url_video):
             example: 'https://judobase.ijf.org/#/competition/contest/gs_jpn2017_m_p100_0004'
     """
     driver.get(url_video)
-    time.sleep(1)
-
-    # extract names
-    local, opponent = map(lambda x: x.text, driver.find_elements_by_class_name('col-xs-6'))
-    local, opponent = map(lambda x: x[:x.find('\n')], [local, opponent])
-
-    is_local = (local == competitor_name)
-    
-    # extract YOUTUBE url
-    count = 0
-    while True:
-        try:
-            youtube_frame = driver.find_element_by_class_name('js-media')
-            driver.switch_to.frame(youtube_frame)
-            time.sleep(1)
-            url_youtube = driver.find_element_by_class_name('ytp-title-link').get_attribute('href')
-            break
-        except:
-            count += 1
-            if count == 5:
-                url_youtube = 'error'
-                print('STOP Retry')
-                break
-            
-            print('Retry...')
-            driver.get(url_video)
-            time.sleep(1)
-    
-    # extract battle info
-    driver.get(url_video)
-    time.sleep(1)
-    # tabla con puntuaciones etiquetadas en tiempo
-    tablas = driver.find_elements_by_tag_name('tbody')
-    tabla_timed_points = tablas[1] 
-    filas = tabla_timed_points.find_elements_by_tag_name('tr')
-    
-    if len(filas) == 0:
-        return []
-    
     try:
+        time.sleep(1) 
+        # extract names
+        local, opponent = map(lambda x: x.text, driver.find_elements_by_class_name('col-xs-6'))
+        local, opponent = map(lambda x: x[:x.find('\n')], [local, opponent])
+
+        is_local = (local == competitor_name)
+
+        # extract YOUTUBE url
+        count = 0
+        while True:
+            try:
+                youtube_frame = driver.find_element_by_class_name('js-media')
+                driver.switch_to.frame(youtube_frame)
+                time.sleep(1)
+                url_youtube = driver.find_element_by_class_name('ytp-title-link').get_attribute('href')
+                break
+            except:
+                count += 1
+                if count == 5:
+                    url_youtube = 'error'
+                    print('STOP Retry')
+                    break
+
+                print('Retry...')
+                driver.get(url_video)
+                time.sleep(1)
+
+        # extract battle info
+        driver.get(url_video)
+        time.sleep(1)
+
+        # tabla con puntuaciones etiquetadas en tiempo
+        tablas = driver.find_elements_by_tag_name('tbody')    
+        tabla_timed_points = tablas[1] 
+        filas = tabla_timed_points.find_elements_by_tag_name('tr')
+
+        if len(filas) == 0:
+            return []
+    
+
         ncols = len(filas[0].find_elements_by_tag_name('td'))
         actions = []
         
@@ -540,7 +542,7 @@ def get_info_video_judobase(competitor_name, driver, url_video):
         
     except Exception as err:
         traceback.print_exc()
-        print(opponent if is_local else local, 'error', url_video, err)
+        print('error at ', url_video, err)
         return []
 
     return actions
