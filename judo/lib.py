@@ -470,14 +470,82 @@ def get_info_video_judobase(competitor_name, driver, url_video):
             example: 'https://judobase.ijf.org/#/competition/contest/gs_jpn2017_m_p100_0004'
     """
     driver.get(url_video)
+    
+    
     try:
-        time.sleep(1) 
+        time.sleep(1)
         # extract names
         local, opponent = map(lambda x: x.text, driver.find_elements_by_class_name('col-xs-6'))
         local, opponent = map(lambda x: x[:x.find('\n')], [local, opponent])
 
         is_local = (local == competitor_name)
+        
+    except Exception as err:
+        try:
+            time.sleep(2)
+            alert = driver.switch_to_alert()
+            alert.accept()
+            print('popup error at ', url_video, err)
+        except:
+            traceback.print_exc()
+            print(url_video)
+            print('error', err)
+    
+    time.sleep(1)
+    # extract names
+    local, opponent = map(lambda x: x.text, driver.find_elements_by_class_name('col-xs-6'))
+    local, opponent = map(lambda x: x[:x.find('\n')], [local, opponent])
 
+    is_local = (local == competitor_name)
+
+    # extract battle info
+    try:
+        # tabla con puntuaciones etiquetadas en tiempo
+        tablas = driver.find_elements_by_tag_name('tbody')    
+        tabla_timed_points = tablas[1] 
+        filas = tabla_timed_points.find_elements_by_tag_name('tr')
+
+        if len(filas) == 0:
+            return []
+
+        ncols = len(filas[0].find_elements_by_tag_name('td'))
+        actions = []
+
+        if ncols == 3:
+            for row_number, row in enumerate(filas):
+                cols = row.find_elements_by_tag_name('td')
+                if cols[0].text:
+                    you = 0 + is_local
+                    what, what2 = cols[0].text.split('\n')[:2] + ([' '] if len(cols[0].text.split('\n')) == 1 else [])
+                else:
+                    you = 1 - is_local
+                    what, what2 = cols[2].text.split('\n')[:2] + ([' '] if len(cols[2].text.split('\n')) == 1 else [])
+
+                time_action = cols[1].text
+                minutes, seconds = time_action.split(':')
+                # url = url_youtube + '&t=' + str(60*int(minutes) + int(seconds))
+                # will be returned instead of url_video if better
+
+                if 'HSK' in what2:
+                    what, what2 = what2, what
+
+                actions.append((opponent if is_local else local, you, what, what2, time_action, url_video))
+            '''    
+            else:
+                for row_number, row in enumerate(filas):
+                    for col_number, value in enumerate(row.find_elements_by_tag_name('td')):
+                        print(row_number, col_number, value.text)
+            '''
+            
+        return actions
+    
+    except Exception as err:
+        traceback.print_exc()
+        print('error', err)
+        
+        return []
+    
+'''
         # extract YOUTUBE url
         count = 0
         while True:
@@ -497,52 +565,4 @@ def get_info_video_judobase(competitor_name, driver, url_video):
                 print('Retry...')
                 driver.get(url_video)
                 time.sleep(1)
-
-        # extract battle info
-        driver.get(url_video)
-        time.sleep(1)
-
-        # tabla con puntuaciones etiquetadas en tiempo
-        tablas = driver.find_elements_by_tag_name('tbody')    
-        tabla_timed_points = tablas[1] 
-        filas = tabla_timed_points.find_elements_by_tag_name('tr')
-
-        if len(filas) == 0:
-            return []
-    
-
-        ncols = len(filas[0].find_elements_by_tag_name('td'))
-        actions = []
-        
-        if ncols == 3:
-            for row_number, row in enumerate(filas):
-                cols = row.find_elements_by_tag_name('td')
-                if cols[0].text:
-                    you = 0 + is_local
-                    what, what2 = cols[0].text.split('\n')[:2] + ([' '] if len(cols[0].text.split('\n')) == 1 else [])
-                else:
-                    you = 1 - is_local
-                    what, what2 = cols[2].text.split('\n')[:2] + ([' '] if len(cols[2].text.split('\n')) == 1 else [])
-
-                time_action = cols[1].text
-                minutes, seconds = time_action.split(':')
-                url = url_youtube + '&t=' + str(60*int(minutes) + int(seconds))
-                # will be returned instead of url_video if better
-                
-                if 'HSK' in what2:
-                    what, what2 = what2, what
-                
-                actions.append((opponent if is_local else local, you, what, what2, time_action, url_video))
-        '''    
-        else:
-            for row_number, row in enumerate(filas):
-                for col_number, value in enumerate(row.find_elements_by_tag_name('td')):
-                    print(row_number, col_number, value.text)
-        '''
-        
-    except Exception as err:
-        traceback.print_exc()
-        print('error at ', url_video, err)
-        return []
-
-    return actions
+'''
